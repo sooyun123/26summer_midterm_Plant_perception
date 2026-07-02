@@ -638,9 +638,8 @@
 
       // ── 사물 모드에서 보여줄 원목 가구 이미지 목록 ──
       // furniture/ 폴더 안에 아래 파일명 그대로 이미지를 넣으면 자동으로 작동함.
-      // (지금은 이미지가 없는 상태 — 넣기 전까지는 #objectImg의 onerror가 발동해서
-      // "가구 이미지 준비 중" 안내 텍스트가 대신 보임)
-      // 각 이미지에 대응하는 생성 프롬프트 키워드를 주석으로 같이 남겨둠.
+      // 지금은 8장(01~08)만 준비되어 있어서 그 8개만 활성화해둠.
+      // 09_coat-rack, 10_plant-stand는 이미지가 생기면 주석만 풀면 바로 추가됨.
       const FURNITURE_IMAGES = [
         'furniture/01_rocking-chair.jpg',   // 원목 흔들의자
         'furniture/02_stool.jpg',           // 원목 스툴
@@ -650,8 +649,8 @@
         'furniture/06_rocking-horse.jpg',   // 원목 흔들목마
         'furniture/07_side-table.jpg',      // 원목 사이드 테이블
         'furniture/08_bookshelf.jpg',       // 원목 책장
-        'furniture/09_coat-rack.jpg',       // 원목 옷걸이 스탠드
-        'furniture/10_plant-stand.jpg',     // 원목 화분 스탠드
+        // 'furniture/09_coat-rack.jpg',    // 원목 옷걸이 스탠드 — 이미지 생기면 주석 해제
+        // 'furniture/10_plant-stand.jpg',  // 원목 화분 스탠드 — 이미지 생기면 주석 해제
       ];
 
       function showRandomFurniture() {
