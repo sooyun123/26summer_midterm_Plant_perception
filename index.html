@@ -139,7 +139,10 @@
   <video id="camInput" autoplay muted playsinline></video>
   <!-- 임시 디버그 표시 — 카메라/모델/얼굴감지 상태를 화면에서 바로 확인하기 위함.
        원인 파악 후 제거 예정. -->
-  <div id="debugStatus" style="position:fixed; top:8px; left:8px; z-index:999; background:rgba(0,0,0,0.6); color:#0f0; font:11px monospace; padding:6px 8px; border-radius:4px; max-width:90vw; white-space:pre-wrap; pointer-events:none;"></div>
+  <!-- 디버그 상태 표시 — 문제 해결용으로 만들었던 것. 완성 단계라 화면에서
+       숨겨둠(display:none). 나중에 다시 문제가 생기면 이 style의
+       display:none만 지우면 바로 다시 보임. -->
+  <div id="debugStatus" style="display:none; position:fixed; top:8px; left:8px; z-index:999; background:rgba(0,0,0,0.6); color:#0f0; font:11px monospace; padding:6px 8px; border-radius:4px; max-width:90vw; white-space:pre-wrap; pointer-events:none;"></div>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.22.0/tf.min.js"></script>
   <script>
@@ -653,11 +656,23 @@
         // 'furniture/10_plant-stand.jpg',  // 원목 화분 스탠드 — 이미지 생기면 주석 해제
       ];
 
+      let lastFurniturePick = null;
+
       function showRandomFurniture() {
         const objectModeEl = document.getElementById('objectMode');
         const imgEl = document.getElementById('objectImg');
         if (!objectModeEl || !imgEl) return;
-        const pick = FURNITURE_IMAGES[Math.floor(Math.random() * FURNITURE_IMAGES.length)];
+        let pick = FURNITURE_IMAGES[Math.floor(Math.random() * FURNITURE_IMAGES.length)];
+        // 직전과 같은 가구가 연속으로 뽑히면 "안 바뀐 것처럼" 보이니,
+        // 후보가 2개 이상일 때는 직전 것과 다른 게 나올 때까지 다시 뽑음
+        if (FURNITURE_IMAGES.length > 1) {
+          let guard = 0;
+          while (pick === lastFurniturePick && guard < 20) {
+            pick = FURNITURE_IMAGES[Math.floor(Math.random() * FURNITURE_IMAGES.length)];
+            guard++;
+          }
+        }
+        lastFurniturePick = pick;
         objectModeEl.classList.remove('img-missing'); // 새 이미지 시도 전엔 일단 초기화
         imgEl.src = pick;
       }
@@ -666,8 +681,9 @@
         if (next === personPresent) return;
         personPresent = next;
         if (next) {
-          // 사람이 새로 감지된 매 순간마다 랜덤한 가구 이미지로 교체 —
-          // 감지될 때마다 다른 가구가 나오게 함
+          // 사람이 새로 감지될 때마다 매번 무조건 새 랜덤 가구로 교체 —
+          // 언제 감지되든(전환 애니메이션 진행 중이든 완전히 끝난 뒤든)
+          // 상관없이 항상 새로운 가구가 나오게 함
           showRandomFurniture();
         }
         document.body.classList.toggle('person-present', personPresent);
