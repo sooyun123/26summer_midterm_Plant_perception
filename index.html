@@ -2077,6 +2077,27 @@ const TRUNK_ZONE_BOUNDS = [
         // 'furniture/10_plant-stand.jpg',  // 원목 화분 스탠드 — 이미지 생기면 주석 해제
       ];
 
+      // 사람이 감지될 때마다 img.src를 바꾸는데, 브라우저가 그 이미지를
+      // 실제로 내려받아 디코딩하는 데 약간의 시간이 걸림. 그런데 화면
+      // 전환(person-present 클래스 부여)은 그 즉시 일어나서, 새 이미지가
+      // 아직 로딩 중인 동안 화면에는 "직전에 보였던 가구"가 잠깐 그대로
+      // 남아있다가 로딩이 끝나는 순간 새 가구로 바뀌는 것처럼 보였음 —
+      // 이게 "이전 가구가 잠깐 나왔다 바뀐다"는 현상의 원인이었음.
+      // 해결: 페이지 로드 시점에 모든 가구 이미지를 미리 브라우저 메모리에
+      // 로드해두는 프리로드 캐시를 만들어서, 이후 img.src를 바꿀 때
+      // 실제로는 이미 완전히 디코딩된 이미지를 즉시 재사용하게 함 —
+      // 그러면 네트워크/디코딩 지연이 사실상 사라져서 화면이 켜지는
+      // 순간 바로 새 이미지가 보임.
+      const preloadedFurnitureImages = {};
+      function preloadFurnitureImages() {
+        for (const src of FURNITURE_IMAGES) {
+          const img = new Image();
+          img.src = src;
+          preloadedFurnitureImages[src] = img;
+        }
+      }
+      preloadFurnitureImages();
+
       let lastFurniturePick = null;
 
       function showRandomFurniture() {
@@ -2095,7 +2116,21 @@ const TRUNK_ZONE_BOUNDS = [
         }
         lastFurniturePick = pick;
         objectModeEl.classList.remove('img-missing'); // 새 이미지 시도 전엔 일단 초기화
-        imgEl.src = pick;
+        const preloaded = preloadedFurnitureImages[pick];
+        if (preloaded && preloaded.complete && preloaded.naturalWidth > 0) {
+          // 이미 프리로드가 끝난 이미지 — src를 바꿔도 즉시 표시됨(지연 없음)
+          imgEl.src = pick;
+        } else {
+          // 아직 프리로드가 안 끝난 경우(드묾)에도 안전하게 동작하도록,
+          // 해당 이미지의 로딩이 실제로 끝난 뒤에 src를 반영함
+          const img = preloaded || new Image();
+          if (!preloaded) { img.src = pick; preloadedFurnitureImages[pick] = img; }
+          if (img.complete && img.naturalWidth > 0) {
+            imgEl.src = pick;
+          } else {
+            img.onload = () => { imgEl.src = pick; };
+          }
+        }
       }
 
       function setPersonPresent(next) {
