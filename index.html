@@ -2122,12 +2122,14 @@ const TRUNK_ZONE_BOUNDS = [
           final: 'furniture/progression_stool_3_final.jpg',   // 광택 나는 완성 스툴
         },
       ];
-      // 무작위 추첨 풀에서 "진행도 연출" 항목을 가리키는 마커 —
-      // FURNITURE_IMAGES(기존, 즉시 전환)와 같은 풀에서 같이 뽑히도록 섞어 넣음.
+      // 무작위 추첨 풀 — 예전 즉시전환 가구 8개(FURNITURE_IMAGES)는 요청에 따라
+      // 더 이상 여기 섞지 않음. 진행도 연출 세트만 뽑히게 함(현재는 스툴 하나뿐이라
+      // 사실상 매번 같은 게 뽑히지만, 나중에 세트가 늘어나면 그중에서 무작위로 뽑힘).
+      // FURNITURE_IMAGES 배열 자체는 나중에 다시 켜고 싶을 때를 위해 그대로 남겨둠 —
+      // 아래 concat(FURNITURE_IMAGES, ...) 를 원래대로 돌리면 다시 섞여서 나옴.
       const PROGRESSION_PICK_MARKER = '__PROGRESSION__';
-      const FURNITURE_PICK_POOL = FURNITURE_IMAGES.concat(
-        PROGRESSION_FURNITURE_SETS.length > 0 ? [PROGRESSION_PICK_MARKER] : []
-      );
+      const FURNITURE_PICK_POOL =
+        PROGRESSION_FURNITURE_SETS.length > 0 ? [PROGRESSION_PICK_MARKER] : FURNITURE_IMAGES;
 
       // 사람이 감지될 때마다 img.src를 바꾸는데, 브라우저가 그 이미지를
       // 실제로 내려받아 디코딩하는 데 약간의 시간이 걸림. 그런데 화면
