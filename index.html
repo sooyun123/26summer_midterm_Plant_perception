@@ -71,6 +71,29 @@
       object-fit: contain;
       display: block;
     }
+    /* ══════════════════════════════════════════════════════════════
+       파이널 프로젝트 추가 기능: "관찰이 지속될수록 대상이 점점 더
+       완성된 상품으로 정제되어간다"는 연출용 3단계(거친 원목→중간→완성)
+       이미지 레이어. #objectImg(기존 미드텀 로직 — 감지 즉시 무작위
+       가구로 전환, 진행도 개념 없음)와는 완전히 별개로 동작함.
+       무작위로 뽑힌 가구가 이 3단계 세트가 배정된 특정 가구일 때만
+       #objectImg 대신 이 3개 레이어가 활성화되고, 그 외의 가구가
+       뽑히면 기존 #objectImg 로직이 그대로(수정 없이) 사용됨.
+       세 레이어는 같은 자리에 절대 위치로 겹쳐진 뒤, JS에서 관찰
+       경과시간에 따라 opacity를 서서히 교차시켜(crossfade) 부드럽게
+       전환됨 — CSS transition은 쓰지 않고 JS가 매 tick마다 직접
+       opacity/filter 값을 계산해서 대입하므로 여기서 별도 transition을
+       주지 않음(이중으로 겹치면 오히려 부자연스러워짐). */
+    .progressionImg {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      max-width: 88%;
+      max-height: 70%;
+      object-fit: contain;
+      opacity: 0;
+      pointer-events: none;
+    }
     /* 이미지 파일이 아직 없거나 로드에 실패했을 때 보이는 안내 텍스트.
        #objectImg의 onerror에서 이 클래스를 붙여 이미지를 숨기고 텍스트를 보여줌 —
        이미지를 나중에 넣기만 하면 이 fallback 텍스트는 자동으로 안 보이게 됨. */
@@ -134,6 +157,12 @@
   <div id="edgeFade"></div>
   <div id="objectMode">
     <img id="objectImg" src="" alt="" onerror="document.getElementById('objectMode').classList.add('img-missing')">
+    <!-- 파이널: 관찰 지속시간에 따라 거친 원목→중간→완성 가구로 크로스페이드되는
+         3단계 레이어. 기본적으로 opacity:0(안 보임)이며, 진행도 연출이 배정된
+         가구가 뽑혔을 때만 JS가 이 셋을 보이게 하고 #objectImg는 숨김. -->
+    <img id="progRoughImg" class="progressionImg" src="" alt="" onerror="document.getElementById('objectMode').classList.add('img-missing')">
+    <img id="progMidImg" class="progressionImg" src="" alt="">
+    <img id="progFinalImg" class="progressionImg" src="" alt="">
     <span>가구 이미지 준비 중 — furniture/ 폴더에 이미지를 넣어주세요</span>
   </div>
   <video id="camInput" autoplay muted playsinline></video>
@@ -1925,7 +1954,10 @@ const TRUNK_ZONE_BOUNDS = [
     (function () {
       const DETECT_INTERVAL_MS = 400;   // 몇 ms마다 한 번씩 얼굴 감지를 시도할지 (너무 자주 돌리면 무거움)
       const PRESENCE_ON_DELAY_MS  = 300;  // 얼굴이 감지된 후 이 시간만큼 유지돼야 '사람 있음'으로 확정 (깜빡임 방지)
-      const PRESENCE_OFF_DELAY_MS = 1800; // 얼굴이 안 보인 후 이 시간이 지나야 '사람 없음'으로 확정 (순간적으로 고개 돌리는 정도로는 안 바뀜)
+      const PRESENCE_OFF_DELAY_MS = 1000; // 얼굴이 안 보인 후 이 시간이 지나야 '사람 없음'으로 확정.
+                                           // 파이널 결정: 1초. 그 이상(1~2초 잠깐 카메라 이탈)도 리셋으로 처리하며,
+                                           // 이때 관찰 진행도(아래 OBSERVATION_DURATION_MS 참고)도 함께 즉시 0으로 리셋됨.
+      const OBSERVATION_DURATION_MS = 10 * 60 * 1000; // 파이널: 이 시간(10분)만큼 연속으로 관찰당하면 진행도 100%(완전히 정제된 상품)에 도달
 
       let model = null;
       let camVideo = null;
@@ -1933,6 +1965,7 @@ const TRUNK_ZONE_BOUNDS = [
       let lastSeenFaceAt = -Infinity;
       let lastNoFaceAt = -Infinity;
       let personPresent = false;
+      let presentSince = null; // 파이널: 사람이 감지되어 person-present가 된 "그 순간"의 timestamp. 진행도(progress) 계산의 기준점.
       let lastFaceCount = 0;
       let detectTicks = 0;
       let loadedCdnUrl = null;
@@ -2077,6 +2110,25 @@ const TRUNK_ZONE_BOUNDS = [
         // 'furniture/10_plant-stand.jpg',  // 원목 화분 스탠드 — 이미지 생기면 주석 해제
       ];
 
+      // ── 파이널: 관찰 지속시간에 따라 거친 원목→중간→완성 가구로 서서히
+      // 정제되어가는 3단계 세트. 지금은 스툴 하나만 준비되어 있고,
+      // 나중에 다른 가구도 같은 구도로 3장씩 준비되면 이 배열에 항목만
+      // 추가하면 됨(각 항목은 rough/mid/final 3개 경로를 가진 객체).
+      // furniture/ 폴더에 아래 파일명 그대로 넣으면 자동으로 작동함.
+      const PROGRESSION_FURNITURE_SETS = [
+        {
+          rough: 'furniture/progression_stool_1_rough.jpg',   // 거친 원목 스툴(마감 전)
+          mid:   'furniture/progression_stool_2_mid.jpg',     // 샌딩된 중간 단계
+          final: 'furniture/progression_stool_3_final.jpg',   // 광택 나는 완성 스툴
+        },
+      ];
+      // 무작위 추첨 풀에서 "진행도 연출" 항목을 가리키는 마커 —
+      // FURNITURE_IMAGES(기존, 즉시 전환)와 같은 풀에서 같이 뽑히도록 섞어 넣음.
+      const PROGRESSION_PICK_MARKER = '__PROGRESSION__';
+      const FURNITURE_PICK_POOL = FURNITURE_IMAGES.concat(
+        PROGRESSION_FURNITURE_SETS.length > 0 ? [PROGRESSION_PICK_MARKER] : []
+      );
+
       // 사람이 감지될 때마다 img.src를 바꾸는데, 브라우저가 그 이미지를
       // 실제로 내려받아 디코딩하는 데 약간의 시간이 걸림. 그런데 화면
       // 전환(person-present 클래스 부여)은 그 즉시 일어나서, 새 이미지가
@@ -2095,42 +2147,104 @@ const TRUNK_ZONE_BOUNDS = [
           img.src = src;
           preloadedFurnitureImages[src] = img;
         }
+        // 진행도 연출용 3단계 이미지도 페이지 로드 시 동일하게 미리 로드해둠 —
+        // 그래야 관찰이 막 시작된 순간(0%)에도 rough 이미지가 지연 없이 바로 보임.
+        for (const set of PROGRESSION_FURNITURE_SETS) {
+          for (const key of ['rough', 'mid', 'final']) {
+            const src = set[key];
+            const img = new Image();
+            img.src = src;
+            preloadedFurnitureImages[src] = img;
+          }
+        }
       }
       preloadFurnitureImages();
 
       let lastFurniturePick = null;
+      let activeProgressionSet = null; // 현재 진행도 연출이 활성화돼있으면 그 3단계 세트 객체, 아니면 null
+
+      // 정적 이미지 하나를 img 엘리먼트에 안전하게(프리로드 캐시 활용) 반영하는 공통 헬퍼.
+      // 기존 showRandomFurniture 안에 있던 로직을 그대로 함수로 뺀 것 — 동작은 바뀌지 않음.
+      function applyPreloadedImage(imgEl, src) {
+        const preloaded = preloadedFurnitureImages[src];
+        if (preloaded && preloaded.complete && preloaded.naturalWidth > 0) {
+          imgEl.src = src;
+        } else {
+          const img = preloaded || new Image();
+          if (!preloaded) { img.src = src; preloadedFurnitureImages[src] = img; }
+          if (img.complete && img.naturalWidth > 0) {
+            imgEl.src = src;
+          } else {
+            img.onload = () => { imgEl.src = src; };
+          }
+        }
+      }
+
+      // 진행도 연출 모드 on/off 전환. off일 땐 기존 #objectImg만 보이고
+      // 3단계 레이어는 완전히 숨김(opacity 0) — 기존 미드텀 로직과 100% 동일하게 동작.
+      // on일 땐 #objectImg를 숨기고 3단계 레이어가 진행도에 따라 크로스페이드됨.
+      function setProgressionMode(active, set) {
+        const imgEl = document.getElementById('objectImg');
+        const roughEl = document.getElementById('progRoughImg');
+        const midEl = document.getElementById('progMidImg');
+        const finalEl = document.getElementById('progFinalImg');
+        if (!imgEl || !roughEl || !midEl || !finalEl) return;
+        if (active) {
+          activeProgressionSet = set;
+          imgEl.style.opacity = '0';
+          applyPreloadedImage(roughEl, set.rough);
+          applyPreloadedImage(midEl, set.mid);
+          applyPreloadedImage(finalEl, set.final);
+          // 시작하는 그 즉시(진행도 0%) rough만 완전히 보이고 나머지는 0 —
+          // "감지되면 즉시 흐릿하고 미완성된 형태로 시작"을 보장.
+          roughEl.style.opacity = '1';
+          midEl.style.opacity = '0';
+          finalEl.style.opacity = '0';
+          roughEl.style.filter = midEl.style.filter = finalEl.style.filter = observationFilterFor(0);
+        } else {
+          activeProgressionSet = null;
+          imgEl.style.opacity = '1';
+          roughEl.style.opacity = '0';
+          midEl.style.opacity = '0';
+          finalEl.style.opacity = '0';
+        }
+      }
+
+      // 진행도(0~1)에 따른 CSS filter 문자열 계산 — 거칠수록(0에 가까울수록) 흐릿하고
+      // 탁하고 대비가 낮게, 완성될수록(1에 가까울수록) 선명하고 채도/대비가 높아짐.
+      function observationFilterFor(t) {
+        const blur = 6 * (1 - t);           // 6px → 0px
+        const saturate = 0.7 + 0.45 * t;    // 0.7 → 1.15
+        const contrast = 0.9 + 0.18 * t;    // 0.9 → 1.08
+        return 'blur(' + blur.toFixed(2) + 'px) saturate(' + saturate.toFixed(2) + ') contrast(' + contrast.toFixed(2) + ')';
+      }
 
       function showRandomFurniture() {
         const objectModeEl = document.getElementById('objectMode');
         const imgEl = document.getElementById('objectImg');
         if (!objectModeEl || !imgEl) return;
-        let pick = FURNITURE_IMAGES[Math.floor(Math.random() * FURNITURE_IMAGES.length)];
-        // 직전과 같은 가구가 연속으로 뽑히면 "안 바뀐 것처럼" 보이니,
+        let pick = FURNITURE_PICK_POOL[Math.floor(Math.random() * FURNITURE_PICK_POOL.length)];
+        // 직전과 같은 가구(또는 진행도 연출)가 연속으로 뽑히면 "안 바뀐 것처럼" 보이니,
         // 후보가 2개 이상일 때는 직전 것과 다른 게 나올 때까지 다시 뽑음
-        if (FURNITURE_IMAGES.length > 1) {
+        if (FURNITURE_PICK_POOL.length > 1) {
           let guard = 0;
           while (pick === lastFurniturePick && guard < 20) {
-            pick = FURNITURE_IMAGES[Math.floor(Math.random() * FURNITURE_IMAGES.length)];
+            pick = FURNITURE_PICK_POOL[Math.floor(Math.random() * FURNITURE_PICK_POOL.length)];
             guard++;
           }
         }
         lastFurniturePick = pick;
         objectModeEl.classList.remove('img-missing'); // 새 이미지 시도 전엔 일단 초기화
-        const preloaded = preloadedFurnitureImages[pick];
-        if (preloaded && preloaded.complete && preloaded.naturalWidth > 0) {
-          // 이미 프리로드가 끝난 이미지 — src를 바꿔도 즉시 표시됨(지연 없음)
-          imgEl.src = pick;
-        } else {
-          // 아직 프리로드가 안 끝난 경우(드묾)에도 안전하게 동작하도록,
-          // 해당 이미지의 로딩이 실제로 끝난 뒤에 src를 반영함
-          const img = preloaded || new Image();
-          if (!preloaded) { img.src = pick; preloadedFurnitureImages[pick] = img; }
-          if (img.complete && img.naturalWidth > 0) {
-            imgEl.src = pick;
-          } else {
-            img.onload = () => { imgEl.src = pick; };
-          }
+
+        if (pick === PROGRESSION_PICK_MARKER) {
+          // 진행도 연출 세트 중 하나를 무작위로 골라 활성화
+          const set = PROGRESSION_FURNITURE_SETS[Math.floor(Math.random() * PROGRESSION_FURNITURE_SETS.length)];
+          setProgressionMode(true, set);
+          return;
         }
+
+        setProgressionMode(false, null);
+        applyPreloadedImage(imgEl, pick);
       }
 
       function setPersonPresent(next) {
@@ -2140,10 +2254,53 @@ const TRUNK_ZONE_BOUNDS = [
           // 사람이 새로 감지될 때마다 매번 무조건 새 랜덤 가구로 교체 —
           // 언제 감지되든(전환 애니메이션 진행 중이든 완전히 끝난 뒤든)
           // 상관없이 항상 새로운 가구가 나오게 함
+          presentSince = performance.now(); // 파이널: 관찰 진행도 계산의 기준 시각을 지금으로 리셋
           showRandomFurniture();
+        } else {
+          // 파이널: 사람이 사라지면 관찰 시간이 얼마나 됐든 그 흔적 없이 진행도를
+          // 즉시 0으로 리셋함 — 축적된 침식도 관찰이 멈추는 순간 함께 사라진다는 메시지.
+          presentSince = null;
+          if (activeProgressionSet) setProgressionMode(false, null);
         }
         document.body.classList.toggle('person-present', personPresent);
         updateDebug();
+      }
+
+      // 파이널: 관찰이 지속되는 동안 주기적으로 진행도(0~1)를 계산해서
+      // 3단계 레이어의 opacity/filter를 갱신함. 진행도 연출이 아닌
+      // 일반 가구가 떠 있을 때는 아무것도 하지 않음(기존 로직 그대로 유지).
+      const OBSERVATION_TICK_MS = 200;
+      function updateObservationProgress() {
+        if (personPresent && activeProgressionSet && presentSince !== null) {
+          const elapsed = performance.now() - presentSince;
+          const t = Math.min(1, Math.max(0, elapsed / OBSERVATION_DURATION_MS)); // 100% 도달 후엔 그대로 고정
+          const roughEl = document.getElementById('progRoughImg');
+          const midEl = document.getElementById('progMidImg');
+          const finalEl = document.getElementById('progFinalImg');
+          if (roughEl && midEl && finalEl) {
+            // rough → mid → final 순서로 절반씩 나눠 크로스페이드
+            let roughOpacity, midOpacity, finalOpacity;
+            if (t <= 0.5) {
+              const localT = t / 0.5;
+              roughOpacity = 1 - localT;
+              midOpacity = localT;
+              finalOpacity = 0;
+            } else {
+              const localT = (t - 0.5) / 0.5;
+              roughOpacity = 0;
+              midOpacity = 1 - localT;
+              finalOpacity = localT;
+            }
+            roughEl.style.opacity = String(roughOpacity);
+            midEl.style.opacity = String(midOpacity);
+            finalEl.style.opacity = String(finalOpacity);
+            const filterStr = observationFilterFor(t);
+            roughEl.style.filter = filterStr;
+            midEl.style.filter = filterStr;
+            finalEl.style.filter = filterStr;
+          }
+        }
+        setTimeout(updateObservationProgress, OBSERVATION_TICK_MS);
       }
 
       async function detectLoop() {
@@ -2181,6 +2338,7 @@ const TRUNK_ZONE_BOUNDS = [
         await Promise.all([initCamera(), initModel()]);
         updateDebug();
         detectLoop();
+        updateObservationProgress(); // 파이널: 진행도 크로스페이드 갱신 루프 시작 (얼굴 감지 루프와는 완전히 별개)
       }
 
       start();
